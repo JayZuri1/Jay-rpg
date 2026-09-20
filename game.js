@@ -1,4 +1,3 @@
-
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-app.js";
 import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-auth.js";
 import { getDatabase, ref, set, update, onValue, onDisconnect, remove } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-database.js";
@@ -623,10 +622,11 @@ function useIndex(index){
 function unequip(slot){if(!equipment[slot])return;sfx("unequip");inventory.push(equipment[slot]);equipment[slot]=null;fixVitals();refreshPanels();saveGame()}
 function fixVitals(){const d=derived();player.hp=Math.min(player.hp,d.maxHp);player.sp=Math.min(player.sp,d.maxSp)}
 function addStat(stat){if(player.statPoints<=0||player.stats[stat]>=99)return;player.stats[stat]++;player.statPoints--;fixVitals();refreshPanels();saveGame()}
+function statsSpent(){return Object.values(player.stats).reduce((a,v)=>a+v,0)-STAT_BASE*Object.keys(player.stats).length}
 const STAT_BASE=5;
 function resetStats(){
- const spent=Object.values(player.stats).reduce((a,v)=>a+v,0)-STAT_BASE*Object.keys(player.stats).length;
- if(spent<=0){showMessage("No stat points to reset.");return}
+ const spent=statsSpent();
+ if(spent<=0){openDialog("Reset Stats","You haven't put any points into your stats yet — everything's still at base 5, so there's nothing to refund. Level up and spend points with the + buttons first.",[{text:"OK",fn:closePanels}]);return}
  openDialog("Reset Stats",`Reset all stats back to ${STAT_BASE} and refund ${spent} point${spent===1?"":"s"}?`,[
   {text:"Reset",fn:()=>{
    for(const s in player.stats)player.stats[s]=STAT_BASE;
@@ -651,6 +651,9 @@ function renderCharacter(){
  const desc={str:"Attack",agi:"Speed",vit:"HP / Defense",dex:"Accuracy",int:"SP / Magic",luk:"Critical"};
  for(const s of Object.keys(player.stats)){const d=document.createElement("div");d.className="stat-row";d.innerHTML=`<span><b class="stat-name">${s.toUpperCase()}</b> <span class="stat-desc">${desc[s]}</span></span><span>${player.stats[s]} <button ${player.statPoints<=0?"disabled":""}>+</button></span>`;d.querySelector("button").onclick=()=>addStat(s);sl.appendChild(d)}
  document.getElementById("statPointsText").textContent=`(${player.statPoints} points)`;
+ const resetBtn=document.getElementById("resetStatsBtn"),spent=statsSpent();
+ resetBtn.disabled=spent<=0;
+ resetBtn.title=spent<=0?"No points spent yet":`Refund ${spent} spent point${spent===1?"":"s"}`;
  const d=derived();document.getElementById("derivedStats").innerHTML=["Attack","Defense","Move Speed","Attack Delay","Critical %","Accuracy %","Magic Attack","Max HP","Max SP"].map((n,i)=>`<div class="derived-row"><span>${n}</span><b>${[d.attack,d.defense,d.speed.toFixed(2),d.attackDelay,d.crit.toFixed(1),d.accuracy.toFixed(1),d.magic,d.maxHp,d.maxSp][i]}</b></div>`).join("");
 }
 function showPanel(id){sfx("open");document.getElementById("panelBackdrop").style.display="block";document.getElementById(id).style.display="block"}
