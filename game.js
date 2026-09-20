@@ -1,4 +1,3 @@
-
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-app.js";
 import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-auth.js";
 import { getDatabase, ref, set, update, onValue, onDisconnect, remove } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-database.js";
@@ -698,9 +697,109 @@ function checkRemotePvPState(){
   if(player.hp<=0){defeat();return}
   if(!inPvpArena()&&document.getElementById("pvpStatus"))document.getElementById("pvpStatus").textContent="🛡 PVP SAFE";
 }
+
+/* ================= AUTO FARM =================
+   Farms every mob of the zone you were standing in when you turned it on.
+   - F key or the on-screen button toggles it
+   - Pressing W/A/S/D stops it
+   - Drinks Red Potions below 50% HP, stops below 35% HP if you have none
+   - Never attacks inside the PvP Arena, so it can't hit other players */
+
+const autoFarm={on:false,zone:null,skip:new Map(),lastX:0,lastY:0,stuck:0,btn:null};
+
+function afInArena(x,y){
+  const tx=Math.floor(x/TILE),ty=Math.floor(y/TILE);
+  return tx>=pvpArena.x1&&tx<=pvpArena.x2&&ty>=pvpArena.y1&&ty<=pvpArena.y2;
+}
+function afNearZone(z,x,y,pad=3){
+  const tx=x/TILE,ty=y/TILE;
+  return tx>=z.x1-pad&&tx<=z.x2+pad&&ty>=z.y1-pad&&ty<=z.y2+pad;
+}
+
+function setAutoFarm(on){
+  if(on){
+    if(!gameStarted||!cloudLoaded){showMessage("Log in first.");return}
+    if(inPvpArena()){showMessage("Start auto farm outside the PvP Arena.");return}
+    autoFarm.zone=zoneAt(player.x,player.y);
+    autoFarm.skip.clear();autoFarm.stuck=0;
+    showMessage(`Auto farm ON: ${autoFarm.zone.name}`);
+  }else if(autoFarm.on){
+    showMessage("Auto farm OFF");
+  }
+  autoFarm.on=on;
+  if(autoFarm.btn)autoFarm.btn.textContent=on?"Auto Farm: ON (F)":"Auto Farm: OFF (F)";
+}
+
+// Called once per frame from gameLoop(), right after movePlayer()
+function autoFarmTick(){
+  if(!autoFarm.on)return;
+  if(!gameStarted||!cloudLoaded){setAutoFarm(false);return}
+  if(keys.w||keys.a||keys.s||keys.d){setAutoFarm(false);return}      // manual control wins
+  const z=autoFarm.zone;
+  if(!afNearZone(z,player.x,player.y)){setAutoFarm(false);return}    // e.g. teleported after defeat
+
+  // HP safety
+  const maxHp=derived().maxHp;
+  if(player.hp<maxHp*.5){
+    const idx=inventory.findIndex(i=>i.id==="red_potion");
+    if(idx>=0)useIndex(idx);
+    else if(player.hp<maxHp*.35){
+      setAutoFarm(false);
+      showMessage("Auto farm stopped: low HP and no potions.");
+      return;
+    }
+  }
+
+  // Pick the nearest living mob of this zone
+  const now=performance.now();
+  let target=null,best=Infinity;
+  for(const e of enemies){
+    if(!e.alive||e.type!==z.mob)continue;
+    if(afInArena(e.x,e.y)||zoneAt(e.x,e.y)!==z)continue;
+    if((autoFarm.skip.get(e.id)||0)>now)continue;                    // recently unreachable
+    const d=Math.hypot(player.x-e.x,player.y-e.y);
+    if(d<best){best=d;target=e}
+  }
+  if(!target)return;                                                 // wait for respawns
+
+  const dx=target.x-player.x,dy=target.y-player.y;
+  player.direction=Math.abs(dx)>Math.abs(dy)?(dx>0?"right":"left"):(dy>0?"down":"up");
+
+  if(best>48){
+    // walk toward it (same collision rules as normal movement)
+    const sp=derived().speed,a=Math.atan2(dy,dx);
+    const nx=player.x+Math.cos(a)*sp,ny=player.y+Math.sin(a)*sp;
+    if(!blocked(nx,player.y))player.x=nx;
+    if(!blocked(player.x,ny))player.y=ny;
+    player.moving=true;if(++player.anim>6)player.anim=0;
+
+    // stuck on a tree/river? give up on this mob for 8 seconds
+    if(Math.hypot(player.x-autoFarm.lastX,player.y-autoFarm.lastY)<.2){
+      if(++autoFarm.stuck>45){autoFarm.skip.set(target.id,now+8000);autoFarm.stuck=0}
+    }else autoFarm.stuck=0;
+    autoFarm.lastX=player.x;autoFarm.lastY=player.y;
+  }else if(!inPvpArena()){
+    attack();                                                        // has its own cooldown
+  }
+}
+
+// F key toggle
+addEventListener("keydown",e=>{
+  if(e.key.toLowerCase()!=="f"||e.repeat||!gameStarted||authScreen.style.display!=="none"||typingInField())return;
+  setAutoFarm(!autoFarm.on);
+});
+
+// On-screen toggle button (works on phones too)
+autoFarm.btn=document.createElement("button");
+autoFarm.btn.textContent="Auto Farm: OFF (F)";
+autoFarm.btn.style.cssText="position:fixed;right:14px;top:70px;z-index:20;padding:8px 12px;cursor:pointer;border-radius:6px;border:2px solid #b89b52;background:rgba(20,25,36,.85);color:#fff;font:bold 12px Arial";
+autoFarm.btn.addEventListener("click",()=>setAutoFarm(!autoFarm.on));
+document.body.appendChild(autoFarm.btn);
+/* ================= END AUTO FARM ================= */
+
 function gameLoop(){
  if(!gameStarted)return;
- movePlayer();updateEnemies();if(player.attackCooldown>0)player.attackCooldown--;if(player.attacking&&--player.attackFrame<=0)player.attacking=false;updateCamera();updateFloats();ctx.clearRect(0,0,canvas.width,canvas.height);drawMap();drawArena();drawDecorations();drawNPCs();drawEnemies();drawRemotePlayers();drawPlayer();drawFloats();drawMinimap();updateUI();requestAnimationFrame(gameLoop)
+ movePlayer();autoFarmTick();updateEnemies();if(player.attackCooldown>0)player.attackCooldown--;if(player.attacking&&--player.attackFrame<=0)player.attacking=false;updateCamera();updateFloats();ctx.clearRect(0,0,canvas.width,canvas.height);drawMap();drawArena();drawDecorations();drawNPCs();drawEnemies();drawRemotePlayers();drawPlayer();drawFloats();drawMinimap();updateUI();requestAnimationFrame(gameLoop)
 }
 function startGame(){
  if(gameStarted)return;
@@ -712,6 +811,7 @@ function startGame(){
  requestAnimationFrame(gameLoop);
 }
 function stopGame(){
+ setAutoFarm(false);
  gameStarted=false;
  stopAmbient();
  if(onlineSyncTimer){clearInterval(onlineSyncTimer);onlineSyncTimer=null;}
