@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#10131a">
+  <title>JAY RPG 255 — Multiplayer</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main id="game">
+    <canvas id="gameCanvas"></canvas>
+
+    <!-- Login/Register stays on top until Firebase Auth confirms a signed-in user. -->
+    <section id="authScreen" aria-label="Login and registration">
+      <form id="authForm" class="auth-card">
+        <div class="auth-logo">⚔ JAY RPG 255</div>
+        <div class="auth-sub">Multiplayer Edition</div>
+
+        <input id="authName" type="text" placeholder="Character name (register only)"
+               maxlength="18" autocomplete="nickname">
+        <input id="authEmail" type="email" placeholder="Email"
+               autocomplete="email" required>
+        <input id="authPassword" type="password" placeholder="Password (6+ characters)"
+               minlength="6" autocomplete="current-password" required>
+
+        <div class="auth-buttons">
+          <button id="loginBtn" type="submit">Login</button>
+          <button id="registerBtn" type="button">Register</button>
+        </div>
+
+        <div id="authMessage" role="status" aria-live="polite">
+          Log in or create an account.
+        </div>
+        <div class="auth-note">
+          Your character can be saved to Firebase when you're online.
+        </div>
+      </form>
+    </section>
+
+    <div id="hud">
+      <div class="player-card">
+        <div class="avatar">⚔</div>
+        <div class="player-info">
+          <div class="player-name">Adventurer</div>
+          <div class="level">Lv. <span id="levelText">1</span> / 255</div>
+          <div class="bar hp"><div id="hpBar"></div></div>
+          <div class="bar sp"><div id="spBar"></div></div>
+          <div class="bar exp"><div id="expBar"></div></div>
+          <div id="onlineStatus">OFFLINE</div>
+        </div>
+      </div>
+      <div class="currency">🪙 <span id="goldText">25</span></div>
+    </div>
+
+    <div id="zoneLabel">Greenwood Village</div>
+    <div id="pvpStatus" class="pvp-off">🛡 PVP SAFE</div>
+    <button id="logoutBtn" type="button">Logout</button>
+
+    <div id="questPanel">
+      <div class="quest-title">📜 QUEST</div>
+      <div id="questName">No Active Quest</div>
+      <div id="questDescription">Talk to an NPC to receive a quest.</div>
+      <div class="quest-progress" id="questProgress">0 / 0</div>
+    </div>
+
+    <div id="minimap">
+      <div class="map-title">WORLD MAP · PINK = PVP</div>
+      <canvas id="miniCanvas" width="220" height="150"></canvas>
+    </div>
+
+    <div id="message"></div>
+
+    <div id="controls">
+      <b>WASD</b> Move · <b>SPACE</b> Attack · <b>E</b> Talk<br>
+      <b>I</b> Inventory · <b>C</b> Character · <b>M</b> Map<br>
+      🛡 Normal world = safe · ⚔ Arena = PvP
+    </div>
+
+    <div id="panelBackdrop"></div>
+
+    <section id="inventoryPanel" class="panel">
+      <button class="close" data-close type="button">×</button>
+      <h2>Inventory</h2>
+      <div class="tabs">
+        <button data-cat="all" type="button">All</button>
+        <button data-cat="weapon" type="button">⚔ Weapons</button>
+        <button data-cat="equipment" type="button">🛡 Equipment</button>
+        <button data-cat="consumable" type="button">🧪 Consumables</button>
+        <button data-cat="misc" type="button">📦 Misc</button>
+      </div>
+      <div id="inventoryList" class="item-grid"></div>
+    </section>
+
+    <section id="characterPanel" class="panel">
+      <button class="close" data-close type="button">×</button>
+      <h2>Character</h2>
+      <div class="char-layout">
+        <div>
+          <div class="equipment-box">
+            <h3>Equipment</h3>
+            <div id="equipmentList"></div>
+          </div>
+        </div>
+        <div>
+          <div class="stats-box">
+            <h3>Stats <span id="statPointsText"></span> <button id="resetStatsBtn" class="action" type="button" style="float:right;font-size:11px">↺ Reset</button></h3>
+            <div id="statsList"></div>
+          </div>
+          <div class="derived-box" id="derivedStats"></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="shopPanel" class="panel">
+      <button class="close" data-close type="button">×</button>
+      <h2 id="shopTitle">Shop</h2>
+      <div id="shopList" class="item-grid"></div>
+    </section>
+
+    <section id="dialogPanel" class="panel small-panel">
+      <button class="close" data-close type="button">×</button>
+      <h2 id="dialogTitle">NPC</h2>
+      <div id="dialogText"></div>
+      <div id="dialogActions"></div>
+    </section>
+  </main>
+
+  <script type="module" src="./game.js"></script>
+</body>
+</html>
