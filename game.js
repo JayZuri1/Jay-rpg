@@ -355,8 +355,9 @@ function spawnMob(type,x,y){
  const scale=1+(lv-1)*.035;
  enemies.push({id:mobId++,type,x:x*TILE+24,y:y*TILE+24,size:28,hp:Math.floor(t.hp*scale),maxHp:Math.floor(t.hp*scale),atk:Math.floor(t.atk*scale),speed:t.speed,exp:Math.floor(t.exp*scale),gold:Math.floor(t.gold*scale),alive:true,attackTimer:0,respawn:0,hitFlash:0,level:lv});
 }
-function randomSpawn(z){return [z.x1+2+Math.random()*Math.max(1,z.x2-z.x1-3),z.y1+2+Math.random()*Math.max(1,z.y2-z.y1-3)]}
-for(const z of zones)for(let i=0;i<8;i++){let p=randomSpawn(z);spawnMob(z.mob,p[0],p[1])}
+// NOTE: randomSpawn() and the initial spawn loop are defined further down,
+// after `blocked()` and the tree decorations exist, so spawns can be
+// checked against the map instead of just the zone's raw rectangle.
 
 const questList=[];
 const questTemplates=[
@@ -411,6 +412,22 @@ function blocked(x,y){
 const decorations=[];
 function addTree(x,y){decorations.push({type:"tree",x:x*TILE+24,y:y*TILE+25})}
 for(let i=0;i<170;i++){let z=zones[Math.floor(Math.random()*zones.length)];addTree(Math.floor(z.x1+Math.random()*(z.x2-z.x1+1)),Math.floor(z.y1+Math.random()*(z.y2-z.y1+1)))}
+
+// Pick a random point inside a zone, but only accept tiles that are
+// actually walkable (not water/river, not inside a tree). Some zones'
+// rectangles overlap the rivers carved into the map, so without this
+// check mobs could spawn on the far side of a river the player can't
+// cross to reach. Falls back to the zone's center if nothing walkable
+// turns up after a bunch of tries (should basically never happen).
+function randomSpawn(z){
+ for(let attempt=0;attempt<40;attempt++){
+  const tx=z.x1+2+Math.random()*Math.max(1,z.x2-z.x1-3);
+  const ty=z.y1+2+Math.random()*Math.max(1,z.y2-z.y1-3);
+  if(!blocked(tx*TILE+24,ty*TILE+24))return [tx,ty];
+ }
+ return [(z.x1+z.x2)/2,(z.y1+z.y2)/2];
+}
+for(const z of zones)for(let i=0;i<8;i++){let p=randomSpawn(z);spawnMob(z.mob,p[0],p[1])}
 
 function movePlayer(){
  let dx=0,dy=0;if(keys.w){dy--;player.direction="up"}if(keys.s){dy++;player.direction="down"}if(keys.a){dx--;player.direction="left"}if(keys.d){dx++;player.direction="right"}
