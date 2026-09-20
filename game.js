@@ -797,6 +797,68 @@ autoFarm.btn.addEventListener("click",()=>setAutoFarm(!autoFarm.on));
 document.body.appendChild(autoFarm.btn);
 /* ================= END AUTO FARM ================= */
 
+/* ================= AUTO UI SCALE =================
+   Scales the HUD (player card, quest box, minimap, buttons...) and the popup
+   panels to fit the screen on PC and Android, and re-fits on resize / rotate.
+   To test a size by hand, add ?ui=0.8 (or any number) to the page URL. */
+(function autoUIScale(){
+  if(!(window.CSS&&CSS.supports&&CSS.supports("zoom","1")))return;
+
+  // Phones need this tag or they render the page at desktop width
+  if(!document.querySelector('meta[name="viewport"]')){
+    const m=document.createElement("meta");
+    m.name="viewport";m.content="width=device-width,initial-scale=1,viewport-fit=cover";
+    document.head.appendChild(m);
+  }
+
+  const MIN=.6,MAX=1.6;
+  const forced=parseFloat(new URLSearchParams(location.search).get("ui"));
+  let raf=0;
+
+  function pickScale(){
+    if(forced>0)return Math.min(MAX,Math.max(.3,forced));
+    const w=innerWidth,h=innerHeight;
+    // design size: 1280x720 landscape, 720x1280 portrait
+    const raw=w>=h?Math.min(w/1280,h/720):Math.min(w/720,h/1280);
+    return Math.min(MAX,Math.max(MIN,raw));
+  }
+
+  // Everything sitting next to the game canvas (the HUD), except the canvas,
+  // touch controls, backdrop, login screen and popup panels.
+  const SKIP=/^(SCRIPT|STYLE|LINK|META|NOSCRIPT|HEAD|TITLE)$/;
+  function hudElements(){
+    const list=[],path=new Set();
+    for(let n=canvas;n&&n!==document.documentElement;n=n.parentElement)path.add(n);
+    for(const anc of path){
+      if(anc===canvas)continue;
+      for(const el of anc.children){
+        if(path.has(el)||SKIP.test(el.tagName))continue;
+        if(el.id==="touchControls"||el.id==="panelBackdrop"||el.id==="authScreen"||el.classList.contains("panel"))continue;
+        if(el.id==="minimap"&&document.body.classList.contains("touch"))continue; // phone CSS already shrinks it
+        list.push(el);
+      }
+    }
+    return list;
+  }
+
+  function apply(){
+    const s=pickScale(),cap=Math.min(s,1);
+    const hud=hudElements();
+    const inHud=el=>hud.some(h=>h.contains(el));
+    hud.forEach(el=>{el.style.zoom=s});
+    // Popups and the login card shrink on small screens but never grow, so they can't overflow
+    const pop=[...document.querySelectorAll(".panel"),...(authScreen?[...authScreen.children]:[])];
+    pop.forEach(el=>{el.style.zoom=inHud(el)?cap/s:cap});
+  }
+
+  const schedule=()=>{cancelAnimationFrame(raf);raf=requestAnimationFrame(apply)};
+  addEventListener("resize",schedule);
+  addEventListener("orientationchange",schedule);
+  if(window.visualViewport)visualViewport.addEventListener("resize",schedule);
+  schedule();
+})();
+/* ================= END AUTO UI SCALE ================= */
+
 function gameLoop(){
  if(!gameStarted)return;
  movePlayer();autoFarmTick();updateEnemies();if(player.attackCooldown>0)player.attackCooldown--;if(player.attacking&&--player.attackFrame<=0)player.attacking=false;updateCamera();updateFloats();ctx.clearRect(0,0,canvas.width,canvas.height);drawMap();drawArena();drawDecorations();drawNPCs();drawEnemies();drawRemotePlayers();drawPlayer();drawFloats();drawMinimap();updateUI();requestAnimationFrame(gameLoop)
