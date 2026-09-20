@@ -667,6 +667,288 @@ const questTemplates=[
 ];
 let qi=1;
 for(let cycle=0;cycle<6;cycle++)for(const q of questTemplates){
+ const [name,type,count,exp]=q;questList.push({id:qi++,name:`${name} ${cycle+1}`
+async function logoutRPG(){
+  stopGame();
+  try{await signOut(auth)}catch(e){console.warn(e)}
+}
+window.logoutRPG=logoutRPG;
+
+function fetchCharacterOnce(uid){
+  return new Promise(resolve=>{
+    let done=false;
+    const finish=v=>{if(done)return;done=true;resolve(v)};
+    const timer=setTimeout(()=>finish(null),5000);
+    onValue(ref(db,`characters/${uid}`),snap=>{clearTimeout(timer);finish(snap.val())},{onlyOnce:true});
+  });
+}
+
+
+async function loadCloudCharacter(user=currentUser){
+  if(!user || cloudLoaded) return;
+  cloudLoaded=true;
+  try{
+    const data=await fetchCharacterOnce(user.uid);
+    if(data){
+      if(data.player) Object.assign(player,data.player);
+      if(data.equipment) Object.assign(equipment,data.equipment);
+      if(Array.isArray(data.inventory)){
+        inventory.length=0;
+        data.inventory.forEach(i=>inventory.push(i));
+      }
+      if("activeQuestId" in data) activeQuestId=data.activeQuestId ?? null;
+      if(Array.isArray(data.quests)){
+        data.quests.forEach(saved=>{
+          const q=questList.find(x=>x.id===saved.id);
+          if(q){q.progress=saved.progress||0;q.done=!!saved.done;}
+        });
+      }
+      if(data.profile?.name) playerName=data.profile.name;
+      fixVitals();
+      updateUI();
+    }else{
+      await saveGame();
+    }
+  }catch(e){
+    console.warn("Cloud character load failed:",e);
+  }
+}
+
+function maxHP(){
+  return derived().maxHp;
+}
+
+function inPvpArena(){
+  const tx=Math.floor(player.x/TILE);
+  const ty=Math.floor(player.y/TILE);
+  return tx>=pvpArena.x1 && tx<=pvpArena.x2 &&
+         ty>=pvpArena.y1 && ty<=pvpArena.y2;
+}
+
+function startGameForUser(user){
+  currentUser=user;
+  if(!gameStarted) startGame();
+  authScreen.style.display="none";
+  logoutBtn.style.display="block";
+  document.getElementById("onlineStatus").textContent="ONLINE";
+
+  // Listen for other players only after authentication succeeds.
+  if(!playersListenerStarted){
+    playersListenerStarted=true;
+    playersUnsub=onValue(ref(db,"players"),snap=>{
+      remotePlayers=snap.val()||{};
+      net.read="OK";net.total=Object.keys(remotePlayers).length;
+      const others=Object.keys(remotePlayers).filter(id=>id!==currentUser?.uid).length;
+      net.others=others;
+      const st=document.getElementById("onlineStatus");
+      if(st)st.textContent=others?`ONLINE · ${others} other player${others>1?"s":""}`:"ONLINE";
+    },err=>{
+      console.warn("Player sync failed:",err);
+      net.read="ERR "+(err.code||err.message);
+      playersListenerStarted=false; // allow re-attaching on next login
+      playersUnsub=null;
+      showMessage("Can't read other players (check Firebase database rules).");
+    });
+  }
+
+  if(!onlineSyncTimer){
+    onlineSyncTimer=setInterval(()=>{
+      if(!currentUser || !gameStarted) return;
+      const tx=Math.floor(player.x/TILE),ty=Math.floor(player.y/TILE);
+      set(ref(db,`players/${currentUser.uid}`),{
+        name:playerName,
+        x:player.x,
+        y:player.y,
+        level:player.level,
+        hp:player.hp,
+        maxHp:maxHP(),
+        inArena:inPvpArena(),
+        lastSeen:Date.now()
+      }).then(()=>{net.writeOkAt=Date.now();net.writeErr=""})
+        .catch(e=>{console.warn("Presence sync failed:",e);net.writeErr=e.code||e.message});
+    },250);
+  }
+
+  // Re-register the disconnect cleanup every time the connection (re)opens,
+  // because the server only runs each onDisconnect handler once.
+  if(!connUnsub){
+    connUnsub=onValue(ref(db,".info/connected"),snap=>{
+      net.conn=snap.val();
+      if(snap.val()===true && currentUser){
+        onDisconnect(ref(db,`players/${currentUser.uid}`)).remove().catch(()=>{});
+      }
+    });
+  }
+}
+
+function drawRemotePlayers(){
+  for(const [uid,p] of Object.entries(remotePlayers)){
+    if(uid===currentUser?.uid||!p||typeof p.x!=="number"||typeof p.y!=="number")continue;
+    if(Date.now()-(p.lastSeen||0)>30000)continue; // hide stale/ghost players
+    const x=p.x-camera.x,y=p.y-camera.y;
+    if(x<-50||y<-50||x>canvas.width+50||y>canvas.height+50)continue;
+    ctx.fillStyle="rgba(0,0,0,.35)";ctx.beginPath();ctx.ellipse(x,y+18,15,6,0,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle=p.inArena?"#d84e72":"#4776b8";ctx.fillRect(x-12,y-9,24,28);
+    ctx.fillStyle="#e5ae87";ctx.fillRect(x-10,y-25,20,18);
+    ctx.fillStyle="#33251f";ctx.fillRect(x-11,y-27,22,8);
+    ctx.fillStyle="#fff";ctx.font="bold 11px Arial";ctx.textAlign="center";ctx.fillText(`${p.name||"Player"} Lv.${p.level||1}`,x,y-34);
+    if(p.inArena){ctx.fillStyle="#ff5577";ctx.font="9px Arial";ctx.fillText("PVP",x,y+42)}
+  }
+}
+function remotePlayerAtRange(){
+  if(!inPvpArena())return null;
+  let best=null,bestD=72;
+  for(const [uid,p] of Object.entries(remotePlayers)){
+    if(!p||uid===currentUser?.uid||!p.inArena||Date.now()-(p.lastSeen||0)>30000)continue;
+    const d=Math.hypot(player.x-p.x,player.y-p.y);
+    if(d<bestD){best={uid,...p};bestD=d}
+  }
+  return best;
+}
+async function damageRemote(target,dmg){
+  if(!currentUser||!inPvpArena()||!target.inArena)return;
+  const targetRef=ref(db,`players/${target.uid}`);
+  await update(targetRef,{hp:Math.max(0,(target.hp||0)-dmg),lastHitBy:currentUser.uid,lastHitAt:Date.now()});
+  floating(dmg,target.x,target.y,"PVP");
+}
+
+const canvas=document.getElementById("gameCanvas"),ctx=canvas.getContext("2d");
+const mini=document.getElementById("miniCanvas"),mctx=mini.getContext("2d");ctx.imageSmoothingEnabled=false;mctx.imageSmoothingEnabled=false;
+function resize(){canvas.width=innerWidth;canvas.height=innerHeight}resize();addEventListener("resize",resize);
+
+const TILE=48,MW=120,MH=90,MAX_LEVEL=255;
+const map=Array.from({length:MH},()=>Array(MW).fill("grass"));
+const pvpArena={id:"pvpArena",name:"PvP Arena",x1:6,y1:6,x2:30,y2:13,color:"#7a4d62",mob:null,level:1};
+const zones=[
+ {id:"greenwood",name:"Greenwood Village",x1:5,y1:5,x2:34,y2:28,color:"#4f954b",mob:"slime",level:1},
+ {id:"dustfall",name:"Dustfall Desert",x1:38,y1:5,x2:68,y2:30,color:"#b89058",mob:"scorpion",level:20},
+ {id:"frostpeak",name:"Frostpeak",x1:74,y1:4,x2:112,y2:28,color:"#8cb5c6",mob:"wolf",level:50},
+ {id:"ember",name:"Emberlands",x1:35,y1:38,x2:68,y2:75,color:"#9a553e",mob:"orc",level:90},
+ {id:"shadow",name:"Shadow Ruins",x1:76,y1:38,x2:115,y2:82,color:"#51485e",mob:"wraith",level:140},
+ {id:"wilds",name:"Ancient Wilds",x1:5,y1:42,x2:28,y2:82,color:"#52744a",mob:"goblin",level:170}
+];
+function zoneAt(x,y){
+ let tx=Math.floor(x/TILE),ty=Math.floor(y/TILE);
+ if(tx>=pvpArena.x1&&tx<=pvpArena.x2&&ty>=pvpArena.y1&&ty<=pvpArena.y2)return pvpArena;
+ return zones.find(z=>tx>=z.x1&&tx<=z.x2&&ty>=z.y1&&ty<=z.y2)||zones[0];
+}
+for(let y=0;y<MH;y++)for(let x=0;x<MW;x++){
+ let z=zoneAt(x*TILE,y*TILE); map[y][x]=z.color;
+ if(x===0||y===0||x===MW-1||y===MH-1)map[y][x]="#326b83";
+}
+for(let x=30;x<36;x++)for(let y=0;y<MH;y++)map[y][x]="#326b83";
+for(let x=69;x<73;x++)for(let y=0;y<MH;y++)map[y][x]="#326b83";
+for(let y=32;y<37;y++)for(let x=0;x<MW;x++)map[y][x]="#326b83";
+
+// Bridges: the three rivers above used to run the full width/height of the
+// map with no crossings, walling every zone off from every other one. These
+// carve walkable paths through them so the whole map is actually reachable.
+const BRIDGE_COLOR="#8b6b3d";
+const bridges=[
+ {x1:30,x2:35,y1:13,y2:19},  // Greenwood <-> Dustfall (top row, across x-river)
+ {x1:30,x2:35,y1:53,y2:59},  // Ancient Wilds <-> Emberlands (bottom row, across x-river)
+ {x1:69,x2:72,y1:11,y2:17},  // Dustfall <-> Frostpeak (top row, across x-river)
+ {x1:69,x2:72,y1:53,y2:59},  // Emberlands <-> Shadow Ruins (bottom row, across x-river)
+ {x1:14,x2:18,y1:32,y2:36},  // Greenwood <-> Ancient Wilds (left column, across y-river)
+ {x1:48,x2:52,y1:32,y2:36},  // Dustfall <-> Emberlands (mid column, across y-river)
+ {x1:90,x2:94,y1:32,y2:36}   // Frostpeak <-> Shadow Ruins (right column, across y-river)
+];
+for(const b of bridges)for(let y=b.y1;y<=b.y2;y++)for(let x=b.x1;x<=b.x2;x++)map[y][x]=BRIDGE_COLOR;
+function onBridge(tx,ty){return bridges.some(b=>tx>=b.x1&&tx<=b.x2&&ty>=b.y1&&ty<=b.y2)}
+
+const player={x:18*TILE,y:18*TILE,size:28,level:1,exp:0,gold:25,hp:100,sp:50,statPoints:0,
+ stats:{str:5,agi:5,vit:5,dex:5,int:5,luk:5},direction:"down",moving:false,anim:0,attackCooldown:0,attacking:false,attackFrame:0};
+const equipment={weapon:null,armor:null,helmet:null,shield:null,boots:null,accessory:null};
+const inventory=[];
+const items=[
+ {id:"rusty_sword",name:"Rusty Sword",slot:"weapon",cat:"weapon",rarity:"Common",price:30,stats:{atk:8}},
+ {id:"iron_sword",name:"Iron Sword",slot:"weapon",cat:"weapon",rarity:"Common",price:180,stats:{atk:16,str:1}},
+ {id:"knight_blade",name:"Knight Blade",slot:"weapon",cat:"weapon",rarity:"Rare",price:900,stats:{atk:34,str:3,dex:2}},
+ {id:"flame_saber",name:"Flame Saber",slot:"weapon",cat:"weapon",rarity:"Epic",price:4200,stats:{atk:65,str:7,luk:3}},
+ {id:"shadow_fang",name:"Shadow Fang",slot:"weapon",cat:"weapon",rarity:"Legendary",price:15000,stats:{atk:110,agi:8,luk:8}},
+ {id:"cloth_tunic",name:"Cloth Tunic",slot:"armor",cat:"equipment",rarity:"Common",price:40,stats:{def:3,hp:10}},
+ {id:"leather_armor",name:"Leather Armor",slot:"armor",cat:"equipment",rarity:"Common",price:220,stats:{def:7,hp:25,agi:1}},
+ {id:"knight_mail",name:"Knight Mail",slot:"armor",cat:"equipment",rarity:"Rare",price:1400,stats:{def:22,hp:90,vit:4}},
+ {id:"ember_plate",name:"Ember Plate",slot:"armor",cat:"equipment",rarity:"Epic",price:7000,stats:{def:48,hp:180,vit:8,str:4}},
+ {id:"shadow_robe",name:"Shadow Robe",slot:"armor",cat:"equipment",rarity:"Legendary",price:18000,stats:{def:38,hp:160,int:10,agi:8}},
+ {id:"adventurer_cap",name:"Adventurer Cap",slot:"helmet",cat:"equipment",rarity:"Common",price:35,stats:{vit:1,hp:5}},
+ {id:"steel_helm",name:"Steel Helm",slot:"helmet",cat:"equipment",rarity:"Rare",price:650,stats:{def:9,vit:3,hp:30}},
+ {id:"wood_shield",name:"Wooden Shield",slot:"shield",cat:"equipment",rarity:"Common",price:50,stats:{def:4}},
+ {id:"tower_shield",name:"Tower Shield",slot:"shield",cat:"equipment",rarity:"Rare",price:1200,stats:{def:20,vit:4,hp:60,agi:-2}},
+ {id:"simple_boots",name:"Simple Boots",slot:"boots",cat:"equipment",rarity:"Common",price:45,stats:{speed:.25}},
+ {id:"swift_boots",name:"Swift Boots",slot:"boots",cat:"equipment",rarity:"Rare",price:850,stats:{speed:1.0,agi:4}},
+ {id:"copper_ring",name:"Copper Ring",slot:"accessory",cat:"equipment",rarity:"Common",price:80,stats:{str:1,dex:1}},
+ {id:"swift_ring",name:"Swift Ring",slot:"accessory",cat:"equipment",rarity:"Rare",price:600,stats:{agi:3,dex:2}},
+ {id:"ruby_ring",name:"Ruby Ring",slot:"accessory",cat:"equipment",rarity:"Epic",price:3500,stats:{str:5,luk:3}},
+ {id:"red_potion",name:"Red Potion",cat:"consumable",rarity:"Common",price:15,stats:{heal:50}},
+ {id:"blue_potion",name:"Blue Potion",cat:"consumable",rarity:"Common",price:20,stats:{sp:30}},
+ {id:"teleport_scroll",name:"Return Scroll",cat:"consumable",rarity:"Common",price:25,stats:{teleport:1}}
+];
+function item(id){return items.find(i=>i.id===id)}
+function give(id,n=1){for(let i=0;i<n;i++)inventory.push(JSON.parse(JSON.stringify(item(id))))}
+give("rusty_sword");give("cloth_tunic");give("adventurer_cap");give("wood_shield");give("simple_boots");give("copper_ring");give("red_potion",3);
+
+function equipmentStats(){
+ const s={atk:0,def:0,hp:0,sp:0,speed:0,str:0,agi:0,vit:0,dex:0,int:0,luk:0};
+ Object.values(equipment).forEach(i=>{if(i?.stats)for(const k in i.stats)s[k]=(s[k]||0)+i.stats[k]});
+ return s;
+}
+function derived(){
+ const e=equipmentStats(),s=player.stats;
+ return {
+  maxHp:100+s.vit*12+(player.level-1)*10+e.hp,
+  maxSp:50+s.int*8+(player.level-1)*3+e.sp,
+  attack:10+s.str*3+s.dex+Math.floor(s.luk*.5)+e.atk,
+  defense:s.vit*2+e.def,
+  speed:4+s.agi*.08+e.speed,
+  attackDelay:Math.max(7,24-Math.floor(s.agi/3)),
+  crit:Math.min(35,3+s.luk*.5),
+  accuracy:Math.min(98,70+s.dex*1.5),
+  magic:5+s.int*4
+ };
+}
+player.hp=derived().maxHp;player.sp=derived().maxSp;
+
+const npc=[
+ {id:"elder",name:"Elder Rowan",x:18*TILE,y:14*TILE,type:"quest"},
+ {id:"blacksmith",name:"Blacksmith",x:23*TILE,y:17*TILE,type:"shop"},
+ {id:"healer",name:"Healer Mira",x:14*TILE,y:21*TILE,type:"heal"},
+ {id:"desert",name:"Desert Guide",x:41*TILE,y:16*TILE,type:"quest"},
+ {id:"frost",name:"Frost Sage",x:82*TILE,y:13*TILE,type:"quest"},
+ {id:"ember",name:"Ember Captain",x:42*TILE,y:47*TILE,type:"quest"},
+ {id:"shadow",name:"Shadow Keeper",x:84*TILE,y:49*TILE,type:"quest"},
+ {id:"wild",name:"Wild Hunter",x:12*TILE,y:51*TILE,type:"quest"}
+];
+
+const mobTypes={
+ slime:{name:"Green Slime",hp:55,atk:8,speed:1.0,exp:25,gold:8,color:"#a34dcc"},
+ scorpion:{name:"Sand Scorpion",hp:180,atk:25,speed:1.25,exp:90,gold:30,color:"#c68a3a"},
+ wolf:{name:"Ice Wolf",hp:500,atk:55,speed:1.7,exp:260,gold:80,color:"#b9d9e8"},
+ orc:{name:"Ember Orc",hp:1100,atk:95,speed:1.15,exp:700,gold:190,color:"#a45c3d"},
+ wraith:{name:"Shadow Wraith",hp:2300,atk:170,speed:1.4,exp:1600,gold:500,color:"#806b9e"},
+ goblin:{name:"Ancient Goblin",hp:3200,atk:210,speed:1.35,exp:2300,gold:700,color:"#5d9b55"}
+};
+const enemies=[];let mobId=1;
+function spawnMob(type,x,y){
+ const t=mobTypes[type],z=zones.find(q=>q.mob===type)||zones[0],lv=z.level+Math.floor(Math.random()*6);
+ const scale=1+(lv-1)*.035;
+ enemies.push({id:mobId++,type,x:x*TILE+24,y:y*TILE+24,size:28,hp:Math.floor(t.hp*scale),maxHp:Math.floor(t.hp*scale),atk:Math.floor(t.atk*scale),speed:t.speed,exp:Math.floor(t.exp*scale),gold:Math.floor(t.gold*scale),alive:true,attackTimer:0,respawn:0,hitFlash:0,level:lv});
+}
+// NOTE: randomSpawn() and the initial spawn loop are defined further down,
+// after `blocked()` and the tree decorations exist, so spawns can be
+// checked against the map instead of just the zone's raw rectangle.
+
+const questList=[];
+const questTemplates=[
+ ["Greenwood Slime Hunt","slime",5,100],["Slime Cleanup","slime",10,180],["Slime Menace","slime",20,400],
+ ["Desert Patrol","scorpion",5,500],["Scorpion Extermination","scorpion",12,1000],["Desert Champion","scorpion",25,2200],
+ ["Frozen Hunt","wolf",5,1800],["Ice Wolf Pack","wolf",15,4200],["Frostpeak Guardian","wolf",30,8500],
+ ["Ember Patrol","orc",5,6000],["Orc Breaker","orc",15,14000],["Emberlands War","orc",30,30000],
+ ["Shadow Hunt","wraith",5,15000],["Wraith Purge","wraith",15,35000],["Shadow Ruins","wraith",30,80000],
+ ["Wild Goblin Hunt","goblin",5,22000],["Ancient Goblin War","goblin",15,50000],["Wildlands Champion","goblin",30,120000]
+];
+let qi=1;
+for(let cycle=0;cycle<6;cycle++)for(const q of questTemplates){
  const [name,type,count,exp]=q;questList.push({id:qi++,name:`${name} ${cycle+1}`,type,count,exp:Math.floor(exp*(1+cycle*.55)),gold:Math.floor(exp*.35),progress:0,done:false});
 }
 while(questList.length<105){
