@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>JAY RPG</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="game">
+<canvas id="gameCanvas"></canvas>
+
+<div id="hud">
+  <div class="player-card">
+    <div class="avatar">⚔</div>
+    <div class="player-info">
+      <div class="player-name">Adventurer</div>
+      <div class="level">Lv. <span id="levelText">1</span> / 255</div>
+      <div class="bar hp"><div id="hpBar"></div></div>
+      <div class="bar sp"><div id="spBar"></div></div>
+      <div class="bar exp"><div id="expBar"></div></div>
+    </div>
+  </div>
+  <div class="currency">🪙 <span id="goldText">25</span></div>
+</div>
+
+<div id="zoneLabel">Greenwood Village</div>
+
+<div id="questPanel">
+  <div class="quest-title">📜 QUEST</div>
+  <div id="questName">Village Elder</div>
+  <div id="questDescription">Talk to an NPC to receive a quest.</div>
+  <div class="quest-progress" id="questProgress">0 / 0</div>
+</div>
+
+<div id="minimap">
+  <div class="map-title">WORLD MAP</div>
+  <canvas id="miniCanvas" width="220" height="150"></canvas>
+</div>
+
+<div id="message"></div>
+
+<div id="controls">
+  <b>WASD</b> Move · <b>SPACE</b> Attack · <b>E</b> Talk<br>
+  <b>I</b> Inventory · <b>C</b> Character · <b>M</b> Map
+</div>
+
+<div id="panelBackdrop"></div>
+
+<div id="inventoryPanel" class="panel">
+  <button class="close" onclick="closePanels()">×</button>
+  <h2>Inventory</h2>
+  <div class="tabs">
+    <button data-cat="all">All</button>
+    <button data-cat="weapon">⚔ Weapons</button>
+    <button data-cat="equipment">🛡 Equipment</button>
+    <button data-cat="consumable">🧪 Consumables</button>
+    <button data-cat="misc">📦 Misc</button>
+  </div>
+  <div id="inventoryList" class="item-grid"></div>
+</div>
+
+<div id="characterPanel" class="panel">
+  <button class="close" onclick="closePanels()">×</button>
+  <h2>Character</h2>
+  <div class="char-layout">
+    <div>
+      <div class="equipment-box">
+        <h3>Equipment</h3>
+        <div id="equipmentList"></div>
+      </div>
+    </div>
+    <div>
+      <div class="stats-box">
+        <h3>Stats <span id="statPointsText"></span></h3>
+        <div id="statsList"></div>
+      </div>
+      <div class="derived-box" id="derivedStats"></div>
+    </div>
+  </div>
+</div>
+
+<div id="shopPanel" class="panel">
+  <button class="close" onclick="closePanels()">×</button>
+  <h2 id="shopTitle">Shop</h2>
+  <div id="shopList" class="item-grid"></div>
+</div>
+
+<div id="dialogPanel" class="panel small-panel">
+  <button class="close" onclick="closePanels()">×</button>
+  <h2 id="dialogTitle">NPC</h2>
+  <div id="dialogText"></div>
+  <div id="dialogActions"></div>
+</div>
+
+<script src="game.js"></script>
+</body>
+</html>
